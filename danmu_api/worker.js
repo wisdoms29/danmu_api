@@ -1,6 +1,6 @@
 // 全局状态（Cloudflare 和 Vercel 都可能重用实例）
 // ⚠️ 不是持久化存储，每次冷启动会丢失
-const VERSION = "1.0.0";
+const VERSION = "1.0.3";
 let animes = [];
 let episodeIds = [];
 let episodeNum = 10001; // 全局变量，用于自增 ID
@@ -2277,64 +2277,97 @@ function xmlResponse(data, status = 200) {
   });
 }
 
+function convertChineseNumber(chineseNumber) {
+  // 如果是阿拉伯数字，直接转换
+  if (/^\d+$/.test(chineseNumber)) {
+    return Number(chineseNumber);
+  }
+
+  // 中文数字映射（简体+繁体）
+  const digits = {
+    // 简体
+    '零': 0, '一': 1, '二': 2, '三': 3, '四': 4, '五': 5,
+    '六': 6, '七': 7, '八': 8, '九': 9,
+    // 繁体
+    '壹': 1, '貳': 2, '參': 3, '肆': 4, '伍': 5,
+    '陸': 6, '柒': 7, '捌': 8, '玖': 9
+  };
+
+  // 单位映射（简体+繁体）
+  const units = {
+    // 简体
+    '十': 10, '百': 100, '千': 1000,
+    // 繁体
+    '拾': 10, '佰': 100, '仟': 1000
+  };
+
+  let result = 0;
+  let current = 0;
+  let lastUnit = 1;
+
+  for (let i = 0; i < chineseNumber.length; i++) {
+    const char = chineseNumber[i];
+
+    if (digits[char] !== undefined) {
+      // 数字
+      current = digits[char];
+    } else if (units[char] !== undefined) {
+      // 单位
+      const unit = units[char];
+
+      if (current === 0) current = 1;
+
+      if (unit >= lastUnit) {
+        // 更大的单位，重置结果
+        result = current * unit;
+      } else {
+        // 更小的单位，累加到结果
+        result += current * unit;
+      }
+
+      lastUnit = unit;
+      current = 0;
+    }
+  }
+
+  // 处理最后的个位数
+  if (current > 0) {
+    result += current;
+  }
+
+  return result;
+}
+
+function matchSeason(anime, queryTitle, season) {
+  if (anime.animeTitle.includes(queryTitle)) {
+    const title = anime.animeTitle.split("(")[0].trim();
+    if (title.startsWith(queryTitle)) {
+      const afterTitle = title.substring(queryTitle.length).trim();
+      if (afterTitle === '' && season === 1) {
+        return true;
+      }
+      // match number from afterTitle
+      const seasonIndex = afterTitle.match(/\d+/);
+      if (seasonIndex && seasonIndex[0] === season.toString()) {
+        return true;
+      }
+      // match chinese number
+      const chineseNumber = afterTitle.match(/[一二三四五六七八九十壹贰叁肆伍陆柒捌玖拾]+/);
+      if (chineseNumber && convertChineseNumber(chineseNumber[0]) === season) {
+        return true;
+      }
+    }
+    return false;
+  } else {
+    return false;
+  }
+}
+
 // Extracted function for GET /api/v2/search/anime
 async function searchAnime(url) {
   let curAnimes = [];
   const queryTitle = url.searchParams.get("keyword");
   log("log", `Search anime with keyword: ${queryTitle}`);
-
-  // 查询360
-  const animes360 = await get360Animes(queryTitle);
-  for (const anime of animes360) {
-    let links = [];
-    if (anime.cat_name === "电影") {
-      for (const key in Object.keys(anime.playlinks)) {
-        if (allowedPlatforms.includes(key)) {
-          links.push({"name": key, "url": anime.playlinks[key], "title": `【${key}】${anime.titleTxt}(${anime.year})`});
-        }
-      }
-    } else if (anime.cat_name === "电视剧" || anime.cat_name === "动漫") {
-      if (allowedPlatforms.includes(anime.seriesSite)) {
-        for (let i = 0; i < anime.seriesPlaylinks.length; i++) {
-          const item = anime.seriesPlaylinks[i];
-          links.push({"name": i+1, "url": item.url, "title": `【${anime.seriesSite}】${anime.titleTxt}(${anime.year}) ${i + 1}`});
-        }
-      }
-    } else if (anime.cat_name === "综艺") {
-      for (const site of Object.keys(anime.playlinks_year)) {
-        if (allowedPlatforms.includes(site)) {
-          for (const year of anime.playlinks_year[site]) {
-            const subLinks = await get360Zongyi(anime.id, site, year);
-            links = links.concat(subLinks);
-          }
-        }
-      }
-    }
-
-    let transformedAnime = {
-      animeId: Number(anime.id), // Mapping animeId to id
-      bangumiId: String(anime.id), // Mapping bangumiId to id
-      animeTitle: `${anime.titleTxt}(${anime.year})【${anime.cat_name}】from 360`, // Mapping animeTitle to titleTxt
-      type: anime.cat_name, // Mapping type to cat_name
-      typeDescription: anime.cat_name, // Mapping typeDescription to cat_name
-      imageUrl: anime.cover, // Mapping imageUrl to cover
-      startDate: `${anime.year}-01-01T00:00:00`, // Start date to the year field in ISO format
-      episodeCount: links.length, // Mapping episodeCount to length of seriesPlaylinks
-      rating: 0, // Default rating as 0
-      isFavorited: true, // Assuming all anime are favorited by default
-    };
-
-    curAnimes.push(transformedAnime);
-    // Check if the anime already exists in the animes array
-    const exists = animes.some(existingAnime => existingAnime.animeId === transformedAnime.animeId);
-    if (!exists) {
-      const transformedAnimeCopy = { ...transformedAnime, links: links };
-      addAnime(transformedAnimeCopy);
-    }
-    if (animes.length > MAX_ANIMES) {
-      removeEarliestAnime();
-    }
-  }
 
   // 查询vod
   const animesVod = await getVodAnimes(queryTitle);
@@ -2377,6 +2410,59 @@ async function searchAnime(url) {
       typeDescription: anime.type_name, // Mapping typeDescription to cat_name
       imageUrl: anime.vod_pic, // Mapping imageUrl to cover
       startDate: `${anime.vod_year}-01-01T00:00:00`, // Start date to the year field in ISO format
+      episodeCount: links.length, // Mapping episodeCount to length of seriesPlaylinks
+      rating: 0, // Default rating as 0
+      isFavorited: true, // Assuming all anime are favorited by default
+    };
+
+    curAnimes.push(transformedAnime);
+    // Check if the anime already exists in the animes array
+    const exists = animes.some(existingAnime => existingAnime.animeId === transformedAnime.animeId);
+    if (!exists) {
+      const transformedAnimeCopy = { ...transformedAnime, links: links };
+      addAnime(transformedAnimeCopy);
+    }
+    if (animes.length > MAX_ANIMES) {
+      removeEarliestAnime();
+    }
+  }
+
+  // 查询360
+  const animes360 = await get360Animes(queryTitle);
+  for (const anime of animes360) {
+    let links = [];
+    if (anime.cat_name === "电影") {
+      for (const key in Object.keys(anime.playlinks)) {
+        if (allowedPlatforms.includes(key)) {
+          links.push({"name": key, "url": anime.playlinks[key], "title": `【${key}】${anime.titleTxt}(${anime.year})`});
+        }
+      }
+    } else if (anime.cat_name === "电视剧" || anime.cat_name === "动漫") {
+      if (allowedPlatforms.includes(anime.seriesSite)) {
+        for (let i = 0; i < anime.seriesPlaylinks.length; i++) {
+          const item = anime.seriesPlaylinks[i];
+          links.push({"name": i+1, "url": item.url, "title": `【${anime.seriesSite}】${anime.titleTxt}(${anime.year}) ${i + 1}`});
+        }
+      }
+    } else if (anime.cat_name === "综艺") {
+      for (const site of Object.keys(anime.playlinks_year)) {
+        if (allowedPlatforms.includes(site)) {
+          for (const year of anime.playlinks_year[site]) {
+            const subLinks = await get360Zongyi(anime.id, site, year);
+            links = links.concat(subLinks);
+          }
+        }
+      }
+    }
+
+    let transformedAnime = {
+      animeId: Number(anime.id), // Mapping animeId to id
+      bangumiId: String(anime.id), // Mapping bangumiId to id
+      animeTitle: `${anime.titleTxt}(${anime.year})【${anime.cat_name}】from 360`, // Mapping animeTitle to titleTxt
+      type: anime.cat_name, // Mapping type to cat_name
+      typeDescription: anime.cat_name, // Mapping typeDescription to cat_name
+      imageUrl: anime.cover, // Mapping imageUrl to cover
+      startDate: `${anime.year}-01-01T00:00:00`, // Start date to the year field in ISO format
       episodeCount: links.length, // Mapping episodeCount to length of seriesPlaylinks
       rating: 0, // Default rating as 0
       isFavorited: true, // Assuming all anime are favorited by default
@@ -2441,6 +2527,199 @@ async function searchAnime(url) {
   });
 }
 
+// Extracted function for POST /api/v2/match
+async function matchAnime(url, req) {
+  try {
+    // 获取请求体
+    const body = await req.json();
+
+    // 验证请求体是否有效
+    if (!body) {
+      log("error", "Request body is empty");
+      return jsonResponse(
+        { errorCode: 400, success: false, errorMessage: "Empty request body" },
+        400
+      );
+    }
+
+    // 处理请求体中的数据
+    // 假设请求体包含一个字段，比如 { query: "anime name" }
+    const { fileName } = body;
+    if (!fileName) {
+      log("error", "Missing fileName parameter in request body");
+      return jsonResponse(
+        { errorCode: 400, success: false, errorMessage: "Missing fileName parameter" },
+        400
+      );
+    }
+
+    // 这里可以继续处理 query，比如调用其他服务或数据库查询
+    log("info", `Processing anime match for query: ${fileName}`);
+
+    const regex = /^(.+?)\s+S(\d+)E(\d+)$/;
+    const match = fileName.match(regex);
+
+    let title = match ? match[1] : fileName;
+    let season = match ? parseInt(match[2]) : null;
+    let episode = match ? parseInt(match[3]) : null;
+
+    log("info", "Parsed title, season, episode", { title, season, episode });
+
+    let originSearchUrl = new URL(req.url.replace("/match", `/search/anime?keyword=${title}`));
+    const searchRes = await searchAnime(originSearchUrl);
+    const searchData = await searchRes.json();
+    log("info", `searchData: ${searchData.animes}`);
+
+    let resAnime;
+    let resEpisode;
+    for (const anime of searchData.animes) {
+      if (anime.animeTitle.includes(title)) {
+        let originBangumiUrl = new URL(req.url.replace("/match", `bangumi/${anime.bangumiId}`));
+        const bangumiRes = await getBangumi(originBangumiUrl.pathname);
+        const bangumiData = await bangumiRes.json();
+        log("info", bangumiData);
+        if (season && episode && bangumiData.bangumi.episodes.length >= episode) {
+          // 先判断season
+          if (matchSeason(anime, title, season)) {
+            resEpisode = bangumiData.bangumi.episodes[episode-1];
+            resAnime = anime;
+            break;
+          }
+        } else if (bangumiData.bangumi.episodes.length > 0) {
+          resEpisode = bangumiData.bangumi.episodes[0];
+          resAnime = anime;
+          break;
+        }
+      }
+    }
+
+    let resData = {
+      "errorCode": 0,
+      "success": true,
+      "errorMessage": "",
+      "isMatched": false,
+      "matches": []
+    };
+
+    if (resEpisode) {
+      resData["isMatched"] = true;
+      resData["matches"] = [
+        {
+          "episodeId": resEpisode.episodeId,
+          "animeId": resAnime.animeId,
+          "animeTitle": resAnime.animeTitle,
+          "episodeTitle": resEpisode.episodeTitle,
+          "type": resAnime.type,
+          "typeDescription": resAnime.typeDescription,
+          "shift": 0,
+          "imageUrl": resAnime.imageUrl
+        }
+      ]
+    }
+
+    log("info", `resMatchData: ${resData}`);
+
+    // 示例返回
+    return jsonResponse(resData);
+  } catch (error) {
+    // 处理 JSON 解析错误或其他异常
+    log("error", `Failed to parse request body: ${error.message}`);
+    return jsonResponse(
+      { errorCode: 400, success: false, errorMessage: "Invalid JSON body" },
+      400
+    );
+  }
+}
+
+// Extracted function for GET /api/v2/search/episodes
+async function searchEpisodes(url) {
+  const anime = url.searchParams.get("anime");
+  const episode = url.searchParams.get("episode") || "";
+  
+  log("log", `Search episodes with anime: ${anime}, episode: ${episode}`);
+
+  if (!anime) {
+    log("error", "Missing anime parameter");
+    return jsonResponse(
+      { errorCode: 400, success: false, errorMessage: "Missing anime parameter" },
+      400
+    );
+  }
+
+  // 先搜索动漫
+  let searchUrl = new URL(`/search/anime?keyword=${anime}`, url.origin);
+  const searchRes = await searchAnime(searchUrl);
+  const searchData = await searchRes.json();
+  
+  if (!searchData.success || !searchData.animes || searchData.animes.length === 0) {
+    log("log", "No anime found for the given title");
+    return jsonResponse({
+      errorCode: 0,
+      success: true,
+      errorMessage: "",
+      hasMore: false,
+      animes: []
+    });
+  }
+
+  let resultAnimes = [];
+
+  // 遍历所有找到的动漫，获取它们的集数信息
+  for (const animeItem of searchData.animes) {
+    const bangumiUrl = new URL(`/bangumi/${animeItem.bangumiId}`, url.origin);
+    const bangumiRes = await getBangumi(bangumiUrl.pathname);
+    const bangumiData = await bangumiRes.json();
+    
+    if (bangumiData.success && bangumiData.bangumi && bangumiData.bangumi.episodes) {
+      let filteredEpisodes = bangumiData.bangumi.episodes;
+
+      // 根据 episode 参数过滤集数
+      if (episode) {
+        if (episode === "movie") {
+          // 仅保留剧场版结果
+          filteredEpisodes = bangumiData.bangumi.episodes.filter(ep => 
+            animeItem.typeDescription && (
+              animeItem.typeDescription.includes("电影") || 
+              animeItem.typeDescription.includes("剧场版") ||
+              ep.episodeTitle.toLowerCase().includes("movie") ||
+              ep.episodeTitle.includes("剧场版")
+            )
+          );
+        } else if (/^\d+$/.test(episode)) {
+          // 纯数字，仅保留指定集数
+          const targetEpisode = parseInt(episode);
+          filteredEpisodes = bangumiData.bangumi.episodes.filter(ep => 
+            parseInt(ep.episodeNumber) === targetEpisode
+          );
+        }
+      }
+
+      // 只有当过滤后还有集数时才添加到结果中
+      if (filteredEpisodes.length > 0) {
+        resultAnimes.push({
+          animeId: animeItem.animeId,
+          animeTitle: animeItem.animeTitle,
+          type: animeItem.type,
+          typeDescription: animeItem.typeDescription,
+          episodes: filteredEpisodes.map(ep => ({
+            episodeId: ep.episodeId,
+            episodeTitle: ep.episodeTitle
+          }))
+        });
+      }
+    }
+  }
+
+  log("log", `Found ${resultAnimes.length} animes with filtered episodes`);
+
+  return jsonResponse({
+    errorCode: 0,
+    success: true,
+    errorMessage: "",
+    animes: resultAnimes
+  });
+}
+
 // Extracted function for GET /api/v2/bangumi/:animeId
 async function getBangumi(path) {
   const animeId = parseInt(path.split("/").pop());
@@ -2487,7 +2766,7 @@ async function getBangumi(path) {
           seasonId: `season-${anime.animeId}`,
           episodeId: link.id,
           episodeTitle: `${link.title}`,
-          episodeNumber: link.id.toString(),
+          episodeNumber: `${i+1}`,
           airDate: anime.startDate,
         });
   }
@@ -2552,16 +2831,20 @@ async function handleRequest(req, env) {
   let path = url.pathname;
   const method = req.method;
 
-  // GET /
-  if (path === "/" && method === "GET") {
+  function handleHomepage() {
     log("log", "Accessed homepage with repository information");
     return jsonResponse({
       message: "Welcome to the LogVar Danmu API server",
       version: VERSION,
       repository: "https://github.com/huangxd-/danmu_api.git",
       description: "一个人人都能部署的基于 js 的弹幕 API 服务器，支持爱优腾芒哔人弹幕直接获取，兼容弹弹play的搜索、详情查询和弹幕获取接口，并提供日志记录，支持vercel/cloudflare/docker/claw等部署方式，不用提前下载弹幕，没有nas或小鸡也能一键部署。",
-      notice: "本项目仅为个人爱好开发，代码开源。如有任何侵权行为，请联系本人删除。纯为爱发电，自用顺便分享，如果真要打赏，可以支付宝发口令红包到我的tg私信机器人 https://t.me/ddjdd_bot ，感谢😊，有问题提issue或私信机器人都ok。"
+      notice: "本项目仅为个人爱好开发，代码开源。如有任何侵权行为，请联系本人删除。有问题提issue或私信机器人都ok。https://t.me/ddjdd_bot"
     });
+  }
+
+  // GET /
+  if (path === "/" && method === "GET") {
+    return handleHomepage();
   }
 
   if (path === "/favicon.ico" || path === "/robots.txt") {
@@ -2570,7 +2853,7 @@ async function handleRequest(req, env) {
 
   // --- 校验 token ---
   const parts = path.split("/").filter(Boolean); // 去掉空段
-  if (parts.length < 2 || parts[0] !== token) {
+  if (parts.length < 1 || parts[0] !== token) {
     log("error", `Invalid or missing token in path: ${path}`);
     return jsonResponse(
       { errorCode: 401, success: false, errorMessage: "Unauthorized" },
@@ -2580,9 +2863,26 @@ async function handleRequest(req, env) {
   // 移除 token 部分，剩下的才是真正的路径
   path = "/" + parts.slice(1).join("/");
 
+  log("log", path);
+
+  // GET /
+  if (path === "/" && method === "GET") {
+    return handleHomepage();
+  }
+
   // GET /api/v2/search/anime
   if (path === "/api/v2/search/anime" && method === "GET") {
     return searchAnime(url);
+  }
+
+  // GET /api/v2/search/episodes
+  if (path === "/api/v2/search/episodes" && method === "GET") {
+    return searchEpisodes(url);
+  }
+
+  // GET /api/v2/match
+  if (path === "/api/v2/match" && method === "POST") {
+    return matchAnime(url, req);
   }
 
   // GET /api/v2/bangumi/:animeId
@@ -2608,6 +2908,8 @@ async function handleRequest(req, env) {
 
   return jsonResponse({ message: "Not found" }, 404);
 }
+
+
 
 // --- Cloudflare Workers 入口 ---
 export default {
@@ -2636,5 +2938,5 @@ export async function vercelHandler(req, res) {
 }
 
 // 为了测试导出 handleRequest
-export { handleRequest, searchAnime, getBangumi, getComment, fetchTencentVideo, fetchIqiyi, fetchMangoTV,
-  fetchBilibili, fetchYouku, fetchOtherServer };
+export { handleRequest, searchAnime, searchEpisodes, matchAnime, getBangumi, getComment, fetchTencentVideo, fetchIqiyi, fetchMangoTV,
+  fetchBilibili, fetchYouku, fetchOtherServer, httpGet, httpPost };
