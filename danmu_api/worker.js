@@ -898,6 +898,14 @@ async function fetchTencentVideo(inputUrl) {
             } else if (content_style.color && content_style.color !== "ffffff") {
               content.color = parseInt(content_style.color.replace("#", ""), 16);
             }
+
+            if (content_style.position) {
+              if (content_style.position === 2) {
+                content.ct = 5;
+              } else if (content_style.position === 3) {
+                content.ct = 4;
+              }
+            }
           } catch (e) {
             // JSON 解析失败，使用默认白色
           }
@@ -1149,6 +1157,11 @@ async function fetchMangoTV(inputUrl) {
             uid: 0,		//发送人的 id
             content: "",
         };
+        if (item.type === 1) {
+          content.ct = 5;
+        } else if (item.type === 2) {
+          content.ct = 4;
+        }
         content.timepoint = item.time / 1000;
         content.content = item.content;
         content.uid = item.uid;
@@ -1576,6 +1589,13 @@ async function fetchYouku(inputUrl) {
             content.timepoint = danmu.playat / 1000;
             if (danmu.propertis?.color) {
               content.color = JSON.parse(danmu.propertis).color;
+            }
+            if (danmu.propertis?.pos) {
+              if (JSON.parse(danmu.propertis).pos === 1) {
+                content.ct = 5;
+              } else if (JSON.parse(danmu.propertis).pos === 2) {
+                content.ct = 4;
+              }
             }
             content.content = danmu.content;
             contents.push(content);
@@ -2567,28 +2587,30 @@ async function searchAnime(url) {
       }
     }
 
-    let transformedAnime = {
-      animeId: Number(anime.vod_id), // Mapping animeId to id
-      bangumiId: String(anime.vod_id), // Mapping bangumiId to id
-      animeTitle: `${anime.vod_name}(${anime.vod_year})【${anime.type_name}】from vod`, // Mapping animeTitle to titleTxt
-      type: anime.type_name, // Mapping type to cat_name
-      typeDescription: anime.type_name, // Mapping typeDescription to cat_name
-      imageUrl: anime.vod_pic, // Mapping imageUrl to cover
-      startDate: `${anime.vod_year}-01-01T00:00:00`, // Start date to the year field in ISO format
-      episodeCount: links.length, // Mapping episodeCount to length of seriesPlaylinks
-      rating: 0, // Default rating as 0
-      isFavorited: true, // Assuming all anime are favorited by default
-    };
+    if (links.length > 0) {
+      let transformedAnime = {
+        animeId: Number(anime.vod_id), // Mapping animeId to id
+        bangumiId: String(anime.vod_id), // Mapping bangumiId to id
+        animeTitle: `${anime.vod_name}(${anime.vod_year})【${anime.type_name}】from vod`, // Mapping animeTitle to titleTxt
+        type: anime.type_name, // Mapping type to cat_name
+        typeDescription: anime.type_name, // Mapping typeDescription to cat_name
+        imageUrl: anime.vod_pic, // Mapping imageUrl to cover
+        startDate: `${anime.vod_year}-01-01T00:00:00`, // Start date to the year field in ISO format
+        episodeCount: links.length, // Mapping episodeCount to length of seriesPlaylinks
+        rating: 0, // Default rating as 0
+        isFavorited: true, // Assuming all anime are favorited by default
+      };
 
-    curAnimes.push(transformedAnime);
-    // Check if the anime already exists in the animes array
-    const exists = animes.some(existingAnime => existingAnime.animeId === transformedAnime.animeId);
-    if (!exists) {
-      const transformedAnimeCopy = { ...transformedAnime, links: links };
-      addAnime(transformedAnimeCopy);
-    }
-    if (animes.length > MAX_ANIMES) {
-      removeEarliestAnime();
+      curAnimes.push(transformedAnime);
+      // Check if the anime already exists in the animes array
+      const exists = animes.some(existingAnime => existingAnime.animeId === transformedAnime.animeId);
+      if (!exists) {
+        const transformedAnimeCopy = { ...transformedAnime, links: links };
+        addAnime(transformedAnimeCopy);
+      }
+      if (animes.length > MAX_ANIMES) {
+        removeEarliestAnime();
+      }
     }
   }
 
@@ -2620,28 +2642,30 @@ async function searchAnime(url) {
       }
     }
 
-    let transformedAnime = {
-      animeId: Number(anime.id), // Mapping animeId to id
-      bangumiId: String(anime.id), // Mapping bangumiId to id
-      animeTitle: `${anime.titleTxt}(${anime.year})【${anime.cat_name}】from 360`, // Mapping animeTitle to titleTxt
-      type: anime.cat_name, // Mapping type to cat_name
-      typeDescription: anime.cat_name, // Mapping typeDescription to cat_name
-      imageUrl: anime.cover, // Mapping imageUrl to cover
-      startDate: `${anime.year}-01-01T00:00:00`, // Start date to the year field in ISO format
-      episodeCount: links.length, // Mapping episodeCount to length of seriesPlaylinks
-      rating: 0, // Default rating as 0
-      isFavorited: true, // Assuming all anime are favorited by default
-    };
+    if (links.length > 0) {
+      let transformedAnime = {
+        animeId: Number(anime.id), // Mapping animeId to id
+        bangumiId: String(anime.id), // Mapping bangumiId to id
+        animeTitle: `${anime.titleTxt}(${anime.year})【${anime.cat_name}】from 360`, // Mapping animeTitle to titleTxt
+        type: anime.cat_name, // Mapping type to cat_name
+        typeDescription: anime.cat_name, // Mapping typeDescription to cat_name
+        imageUrl: anime.cover, // Mapping imageUrl to cover
+        startDate: `${anime.year}-01-01T00:00:00`, // Start date to the year field in ISO format
+        episodeCount: links.length, // Mapping episodeCount to length of seriesPlaylinks
+        rating: 0, // Default rating as 0
+        isFavorited: true, // Assuming all anime are favorited by default
+      };
 
-    curAnimes.push(transformedAnime);
-    // Check if the anime already exists in the animes array
-    const exists = animes.some(existingAnime => existingAnime.animeId === transformedAnime.animeId);
-    if (!exists) {
-      const transformedAnimeCopy = { ...transformedAnime, links: links };
-      addAnime(transformedAnimeCopy);
-    }
-    if (animes.length > MAX_ANIMES) {
-      removeEarliestAnime();
+      curAnimes.push(transformedAnime);
+      // Check if the anime already exists in the animes array
+      const exists = animes.some(existingAnime => existingAnime.animeId === transformedAnime.animeId);
+      if (!exists) {
+        const transformedAnimeCopy = {...transformedAnime, links: links};
+        addAnime(transformedAnimeCopy);
+      }
+      if (animes.length > MAX_ANIMES) {
+        removeEarliestAnime();
+      }
     }
   }
 
@@ -2659,28 +2683,30 @@ async function searchAnime(url) {
       links.push({"name": ep.episodeIndex, "url": ep.episodeId, "title": `【${ep.provider}】${anime.title}(${anime.year}) ${ep.title}`});
     }
 
-    let transformedAnime = {
-      animeId: Number(anime.mediaId), // Mapping animeId to id
-      bangumiId: String(anime.mediaId), // Mapping bangumiId to id
-      animeTitle: `${anime.title}(${anime.year})【${anime.type}】from renren`, // Mapping animeTitle to titleTxt
-      type: anime.type, // Mapping type to cat_name
-      typeDescription: anime.type, // Mapping typeDescription to cat_name
-      imageUrl: anime.imageUrl, // Mapping imageUrl to cover
-      startDate: `${anime.year}-01-01T00:00:00`, // Start date to the year field in ISO format
-      episodeCount: links.length, // Mapping episodeCount to length of seriesPlaylinks
-      rating: 0, // Default rating as 0
-      isFavorited: true, // Assuming all anime are favorited by default
-    };
+    if (links.length > 0) {
+      let transformedAnime = {
+        animeId: Number(anime.mediaId), // Mapping animeId to id
+        bangumiId: String(anime.mediaId), // Mapping bangumiId to id
+        animeTitle: `${anime.title}(${anime.year})【${anime.type}】from renren`, // Mapping animeTitle to titleTxt
+        type: anime.type, // Mapping type to cat_name
+        typeDescription: anime.type, // Mapping typeDescription to cat_name
+        imageUrl: anime.imageUrl, // Mapping imageUrl to cover
+        startDate: `${anime.year}-01-01T00:00:00`, // Start date to the year field in ISO format
+        episodeCount: links.length, // Mapping episodeCount to length of seriesPlaylinks
+        rating: 0, // Default rating as 0
+        isFavorited: true, // Assuming all anime are favorited by default
+      };
 
-    curAnimes.push(transformedAnime);
-    // Check if the anime already exists in the animes array
-    const exists = animes.some(existingAnime => existingAnime.animeId === transformedAnime.animeId);
-    if (!exists) {
-      const transformedAnimeCopy = { ...transformedAnime, links: links };
-      addAnime(transformedAnimeCopy);
-    }
-    if (animes.length > MAX_ANIMES) {
-      removeEarliestAnime();
+      curAnimes.push(transformedAnime);
+      // Check if the anime already exists in the animes array
+      const exists = animes.some(existingAnime => existingAnime.animeId === transformedAnime.animeId);
+      if (!exists) {
+        const transformedAnimeCopy = {...transformedAnime, links: links};
+        addAnime(transformedAnimeCopy);
+      }
+      if (animes.length > MAX_ANIMES) {
+        removeEarliestAnime();
+      }
     }
   }
 
